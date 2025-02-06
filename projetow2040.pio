@@ -1,0 +1,82 @@
+.program ws2812
+.side_set 1
+
+; ============================================================
+; Programa PIO para controlar LEDs WS2812
+;
+; Este programa gera os sinais de controle necessários para
+; acionar os LEDs WS2812 utilizando três intervalos de tempo:
+;   T1: parte inicial do pulso
+;   T2: parte intermediária do pulso
+;   T3: parte final do pulso
+;
+; Os valores de T1, T2 e T3 são definidos em ciclos de clock do PIO.
+; ============================================================
+
+.define T1 2      ; Número de ciclos para a primeira parte do sinal
+.define T2 5      ; Número de ciclos para a parte intermediária
+.define T3 3      ; Número de ciclos para a parte final
+
+.wrap_target
+bitloop:
+    ; Transfere 1 bit para o registrador e seta side-set para 0,
+    ; aguardando (T3 - 1) ciclos.
+    out x, 1 side 0 [T3 - 1]
+
+    ; Se o bit transmitido for 0, pula para "do_zero" com side-set 1,
+    ; aguardando (T1 - 1) ciclos.
+    jmp !x do_zero side 1 [T1 - 1]
+
+do_one:
+    ; Para bit 1, retorna ao início do loop com side-set 1 e espera (T2 - 1) ciclos.
+    jmp bitloop side 1 [T2 - 1]
+
+do_zero:
+    ; Para bit 0, executa um NOP com side-set 0 e espera (T2 - 1) ciclos.
+    nop side 0 [T2 - 1]
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+
+/**
+ * Inicializa o programa WS2812 no PIO.
+ *
+ * Configura o pino de saída, a máquina de estado do PIO e ajusta a divisão
+ * do clock para gerar uma frequência de 800 kHz, conforme exigido pelos WS2812.
+ *
+ * @param pio    Instância do PIO a ser utilizada.
+ * @param sm     Máquina de estado (state machine) a ser configurada.
+ * @param offset Offset do programa WS2812 na memória do PIO.
+ * @param pin    Pino de saída conectado aos LEDs WS2812.
+ */
+static inline void ws2812_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    // Inicializa o pino para uso pelo PIO e configura como saída.
+    pio_gpio_init(pio, pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+
+    // Obtém a configuração padrão do programa WS2812.
+    pio_sm_config c = ws2812_program_get_default_config(offset);
+    // Define o pino de side-set para controlar o sinal.
+    sm_config_set_sideset_pins(&c, pin);
+    // Configura o deslocamento de saída para 24 bits (cor RGB).
+    sm_config_set_out_shift(&c, false, true, 24);
+    // Junta os FIFOs de transmissão para otimização.
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    // Constantes de tempo para WS2812 (valores definidos no código PIO)
+    const float WS2812_T1 = 2.0f;
+    const float WS2812_T2 = 5.0f;
+    const float WS2812_T3 = 3.0f;
+
+    // Calcula a divisão do clock para obter 800 kHz:
+    // clk_div = (clock_sys / (800kHz * (T1 + T2 + T3)))
+    float clk_div = (float)clock_get_hz(clk_sys) / (800000.0f * (WS2812_T1 + WS2812_T2 + WS2812_T3));
+    sm_config_set_clkdiv(&c, clk_div);
+
+    // Inicializa e habilita a máquina de estado.
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
+
