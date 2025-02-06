@@ -1,5 +1,3 @@
-Segue abaixo um exemplo de README.md com uma linguagem profissional, detalhando os objetivos, funcionalidades e explicações sobre as principais funções do projeto:
-
 ---
 
 # Comunicação Serial com Raspberry Pico W 2040, UART, SPI e I2C  
