@@ -219,7 +219,107 @@ uint sm;
 - **pio** → Identifica o PIO usado para o WS2812.
 - **sm** → Máquina de estado para PIO.
 
-(Continua com as explicações das funções e implementações principais...)
+### Inicialização dos WS2812
+```c
+void ws2812_init() {
+    uint offset = pio_add_program(pio, &ws2812_program);
+    sm = pio_claim_unused_sm(pio, true);
+    ws2812_program_init(pio, sm, offset, WS2812_PIN);
+}
+```
+- **pio_add_program()** → Adiciona o código PIO para o controle do WS2812.
+- **pio_claim_unused_sm()** → Aloca uma máquina de estado disponível.
+- **ws2812_program_init()** → Configura o PIO para controlar os LEDs WS2812.
+
+### Atualização da Matriz WS2812
+```c
+void update_led_matrix(uint8_t number) {
+    for (int i = 0; i < 25; i++) {
+        uint8_t r = numbers[number][i] ? 255 : 0;
+        uint32_t color = (0 << 16) | (r << 8) | 0; // Formato GRB
+        pio_sm_put_blocking(pio, sm, color);
+    }
+    sleep_us(50);
+}
+```
+- **Preenche a matriz 5x5** com o número atual usando o canal vermelho.
+- **pio_sm_put_blocking()** → Envia os valores para os LEDs WS2812.
+
+### Processamento de Entrada Serial
+```c
+void process_input(char c) {
+    ssd1306_clear(&display);
+    ssd1306_draw_char(&display, 0, 0, c);
+    ssd1306_send_data(&display);
+    printf("Recebido: %c
+", c);
+
+    if (c >= '0' && c <= '9') {
+        current_number = c - '0';
+        update_matrix = true;
+    }
+}
+```
+- **Exibe o caractere no display SSD1306**.
+- **Se for um número (0-9), atualiza a matriz WS2812**.
+
+### Interrupção dos Botões
+```c
+void gpio_callback(uint gpio, uint32_t events) {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+
+    if (gpio == BUTTON_A_PIN) {
+        if (now - last_time_A < 200) return;
+        last_time_A = now;
+        led_g_state = !led_g_state;
+        gpio_put(LED_G_PIN, led_g_state);
+        ssd1306_draw_string(&display, 0, 0, led_g_state ? "Verde ON" : "Verde OFF");
+    }
+    else if (gpio == BUTTON_B_PIN) {
+        if (now - last_time_B < 200) return;
+        last_time_B = now;
+        led_b_state = !led_b_state;
+        gpio_put(LED_B_PIN, led_b_state);
+        ssd1306_draw_string(&display, 0, 0, led_b_state ? "Azul ON" : "Azul OFF");
+    }
+    ssd1306_send_data(&display);
+}
+```
+- **Verifica debounce** (tempo mínimo entre pressões).
+- **Alterna o estado dos LEDs RGB e exibe no display**.
+
+### Função Principal
+```c
+int main() {
+    stdio_init_all();
+    sleep_ms(100);
+    uart_init(uart0, 115200);
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+    i2c_init(i2c1, 400 * 1000);
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA);
+    gpio_pull_up(I2C_SCL);
+    ssd1306_init(&display, i2c1);
+    ws2812_init();
+
+    while (1) {
+        int c_usb = getchar_timeout_us(0);
+        if (c_usb != PICO_ERROR_TIMEOUT) process_input((char)c_usb);
+        if (uart_is_readable(uart0)) process_input(uart_getc(uart0));
+        if (update_matrix) {
+            update_led_matrix(current_number);
+            update_matrix = false;
+        }
+        sleep_ms(40);
+    }
+    return 0;
+}
+```
+- **Inicializa UART, I2C, botões e LEDs**.
+- **Processa entradas de UART e USB**.
+- **Atualiza a matriz WS2812 quando necessário**.
 
 ---
 
